@@ -594,14 +594,14 @@ def load_F0_models(path):
 def load_ASR_models(ASR_MODEL_PATH, ASR_MODEL_CONFIG):
     # load ASR model
     def _load_config(path):
-        with open(path) as f:
+        with open(path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
         model_config = config['model_params']
         return model_config
 
     def _load_model(model_config, model_path):
         model = ASRCNN(**model_config)
-        params = torch.load(model_path, map_location='cpu')['model']
+        params = torch.load(model_path, map_location='cpu', weights_only=False)['model']
         model.load_state_dict(params)
         return model
 

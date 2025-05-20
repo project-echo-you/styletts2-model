@@ -1,14 +1,6 @@
 import phonemizer.backend
 import torch
-import random
-import numpy as np
-import time
 import yaml
-from munch import Munch
-import numpy as np
-import torch
-from torch import nn
-import torch.nn.functional as F
 import torchaudio
 import librosa
 from nltk.tokenize import word_tokenize
@@ -19,15 +11,15 @@ import phonemizer
 from Utils.PLBERT.util import load_plbert
 from Modules.diffusion.sampler import DiffusionSampler, ADPM2Sampler, KarrasSchedule
 from collections import OrderedDict
-
-
-# ! Phonemizer e spack lib path as os.env ???
+import soundfile
+import nltk
 
 
 class LibriTTSInference:
     def __init__(self, libri_tts_model_path, config_path):
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {self.device}")
         
         self.to_mel = torchaudio.transforms.MelSpectrogram(
             n_mels=80, n_fft=2048, win_length=1200, hop_length=300
@@ -35,7 +27,9 @@ class LibriTTSInference:
         
         self.mean, self.std = -4, 4
         
-        self.config = yaml.safe_load(open(config_path))  
+        # self.config = yaml.safe_load(open(config_path))  
+        with open(config_path, 'r', encoding='utf-8') as f:
+            self.config = yaml.safe_load(f)
         
         self.model_params = recursive_munch(self.config['model_params'])
         
@@ -48,22 +42,29 @@ class LibriTTSInference:
     
     def load_models(self, libri_tts_model_path):
         
+       
+        # Clean up path values by removing trailing commas
+        asr_config = self.config["ASR_config"].rstrip(',')
+        asr_path = self.config["ASR_path"].rstrip(',')
+        f0_path = self.config["F0_path"].rstrip(',')
+        plbert_dir = self.config["PLBERT_dir"].rstrip(',')
+        
         text_aligner_model = load_ASR_models(
-            self.config["ASR_config"]
-            self.config["ASR_path"],
+            asr_path,
+            asr_config,
         )
         
-        pitch_extractor_model = load_F0_models(self.config["F0_path"])
+        pitch_extractor_model = load_F0_models(f0_path)
         
-        plbert_model = load_plbert(self.config["PLBERT_dir"])
+        plbert_model = load_plbert(plbert_dir)
         
         self.model = build_model(
             self.model_params,
             text_aligner_model,
             pitch_extractor_model,
             plbert_model,
-        
         )
+        
         
         # load weights
         params_whole = torch.load(
@@ -92,7 +93,7 @@ class LibriTTSInference:
 
         self.sampler = DiffusionSampler(
             self.model.diffusion.diffusion,
-            sampler=ADPM2Sampler(),
+            sampler=ADPM2Sampler(), 
             sigma_schedule=KarrasSchedule(
                 sigma_min=0.0001, sigma_max=3.0, rho=9.0),  # empirical parameters
             clamp=False
@@ -137,7 +138,7 @@ class LibriTTSInference:
         
         with torch.no_grad():
             input_lengths = torch.LongTensor([tokens.shape[-1]]).to(self.device)
-            text_mask = length_to_mask(input_lengths).to(self.device)
+            text_mask = self.length_to_mask(input_lengths).to(self.device)
 
             t_en = self.model.text_encoder(tokens, input_lengths, text_mask)
             bert_dur = self.model.bert(tokens, attention_mask=(~text_mask).int())
@@ -198,7 +199,33 @@ class LibriTTSInference:
 
 if __name__ == "__main__":
     
+    # Uncomment this line if you get Resource punkt_tab not found error :)
+    # nltk.download('punkt_tab')
+        
     synthesizer = LibriTTSInference(
         libri_tts_model_path="./Models/LibriTTS/epochs_2nd_00020.pth",
         config_path="./Models/LibriTTS/config.yml"
     )
+    
+    reference_style = synthesizer.compute_style("./Models/LibriTTS/woman_sound.wav")
+    
+    sample_text_arr = [
+        
+        # Joy
+        "Wow! I can't believe we won the championship! This is the best day ever! I've been waiting for this moment my entire life!",
+        
+        # Sadness
+        "I miss the way things used to be. Sometimes I sit by the window when it rains, remembering all the moments we shared together.",
+        
+        # Anger
+        "That's the third time this week! I specifically asked you not to do that. Why doesn't anyone ever listen to what I'm saying?!",
+        
+    ]
+    
+    for i, text in enumerate(sample_text_arr):
+        print(f"Generating audio for text: {text}")
+        output = synthesizer.inference(text, reference_style)
+        soundfile.write(f"./inference_checks_done/test_output_woman_{i}.wav", output, 24000)
+    
+    
+    
