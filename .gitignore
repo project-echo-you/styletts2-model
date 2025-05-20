@@ -2,3 +2,4 @@ __pycache__
 .venv/
 Models/LibriTTS/epochs_2nd_00020.pth
 StyleTTS2-LibriTTS/
+Data/wavs/
