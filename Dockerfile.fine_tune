@@ -1,1 +1,38 @@
-# pip install soundfile issue ?
+FROM pytorch/pytorch:2.1.0-cuda11.8-cudnn8-runtime
+
+WORKDIR /app
+
+# Install system dependencies in one layer
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    git \
+    python3-dev \
+    espeak-ng \
+    libsndfile1 \
+    ffmpeg \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy only requirements first to leverage Docker caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir accelerate
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV TORCH_HOME=/app/Models
+# ENV PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
+
+# Copy application code
+COPY . .
+
+# Create entrypoint script with better memory management
+RUN echo '#!/bin/bash\n\
+accelerate launch \
+--mixed_precision=fp16 \
+--num_processes=1 \
+--gpu_memory_limit 20GB \
+train_finetune_accelerate.py --config_path ./Configs/config_ft.yml' > entrypoint.sh \
+&& chmod +x entrypoint.sh
+
+ENTRYPOINT ["./entrypoint.sh"]
