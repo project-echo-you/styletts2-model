@@ -1,9 +1,11 @@
 # load packages
 import random
+import sys
 import yaml
 import time
 from munch import Munch
 import numpy as np
+from tqdm import tqdm
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -54,6 +56,7 @@ logger.addHandler(handler)
 @click.command()
 @click.option('-p', '--config_path', default='Configs/config_ft.yml', type=str)
 def main(config_path):
+    print("\n Starting the fine tuning process ...")
     config = yaml.safe_load(open(config_path))
     
     log_dir = config['log_dir']
@@ -82,6 +85,10 @@ def main(config_path):
     root_path = data_params['root_path']
     min_length = data_params['min_length']
     OOD_data = data_params['OOD_data']
+    
+    print(f"Train data: {train_path}")
+    print(f"Validation data: {val_path}")
+    print(f"Root path (wavs folder): {root_path}")
 
     max_len = config.get('max_len', 200)
     
@@ -103,6 +110,8 @@ def main(config_path):
                                         dataset_config={},
                                         device=device)
 
+    print(f"Train Data loaded and the size is {len(train_dataloader)}")
+
     val_dataloader = build_dataloader(val_list,
                                       root_path,
                                       OOD_data=OOD_data,
@@ -112,6 +121,8 @@ def main(config_path):
                                       num_workers=0,
                                       device=device,
                                       dataset_config={})
+    
+    print(f"Validation Data loaded and the size is {len(val_dataloader)}")
     
     # load pretrained ASR model
     ASR_config = config.get('ASR_config', False)
@@ -246,7 +257,9 @@ def main(config_path):
     model, optimizer, train_dataloader = accelerator.prepare(
         model, optimizer, train_dataloader
     )
-
+    print("\n Starting the training process ...")
+    print(f"Total epochs: {epochs}")
+    
     for epoch in range(start_epoch, epochs):
         running_loss = 0
         start_time = time.time()
@@ -262,7 +275,12 @@ def main(config_path):
         model.msd.train()
         model.mpd.train()
 
-        for i, batch in enumerate(train_dataloader):
+        print(f"\n ###### Epoch number {epoch + 1} of {epochs} ######")
+        
+        train_iter = tqdm(enumerate(train_dataloader), desc="Training", total=len(
+            train_dataloader), file=sys.stdout, bar_format='{l_bar}{bar:30}{r_bar}')
+        
+        for i, batch in train_iter:
             waves = batch[0]
             batch = [b.to(device) for b in batch[1:]]
             texts, input_lengths, ref_texts, ref_lengths, mels, mel_input_length, ref_mels = batch
@@ -574,6 +592,8 @@ def main(config_path):
         loss_f = 0
         _ = [model[key].eval() for key in model]
 
+        print('\n Running the validation ...')
+        
         with torch.no_grad():
             iters_test = 0
             for batch_idx, batch in enumerate(val_dataloader):
